@@ -1,0 +1,643 @@
+diff --git a/.gitignore b/.gitignore
+index e69de29..b2b5f2a 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -0,0 +1,28 @@
++# Dependências / ambientes
++node_modules/
++.venv/
++__pycache__/
++*.py[cod]
++
++# Builds / artefatos
++build/
++dist/
++*.zip
++
++# Arquivos sensíveis
++.env
++backend/.env
++
++# Saídas geradas pelo backend (não versionar)
++backend/resposta_*.pdf
++backend/certidao_*.pdf
++certidoes_*.zip
++
++# Outros temporários
++tmp/
++uploads/
++
+diff --git a/backend/.env.example b/backend/.env.example
+new file mode 100644
+index 0000000..c3f2c2b
+--- /dev/null
++++ b/backend/.env.example
+@@ -0,0 +1,3 @@
++OPENAI_API_KEY=coloque_sua_chave_aqui
++OPENAI_MODEL=gpt-5
++
+diff --git a/requirements.txt b/requirements.txt
+new file mode 100644
+index 0000000..b9b3b9a
+--- /dev/null
++++ b/requirements.txt
+@@ -0,0 +1,10 @@
++fastapi
++uvicorn
++openai>=1.30.0
++python-dotenv
++fpdf
++pdfplumber
++pytesseract
++pdf2image
++Pillow
++
+diff --git a/backend/main.py b/backend/main.py
+index 5b5b5b5..7aa7aa7 100644
+--- a/backend/main.py
++++ b/backend/main.py
+@@ -1,200 +1,222 @@
+-from fastapi import FastAPI, UploadFile, File, Form
+-from fastapi.middleware.cors import CORSMiddleware
+-from fastapi.responses import FileResponse, JSONResponse
+-from openai import OpenAI
+-from dotenv import load_dotenv
+-from fpdf import FPDF
+-import pdfplumber
+-import pytesseract
+-from PIL import Image
+-from pdf2image import convert_from_bytes
+-import os
+-import uuid
+-import datetime
+-import traceback
+-import zipfile
+-import re
++from fastapi import FastAPI, UploadFile, File, Form
++from fastapi.middleware.cors import CORSMiddleware
++from fastapi.responses import FileResponse, JSONResponse
++from openai import OpenAI
++from dotenv import load_dotenv
++from fpdf import FPDF
++import pdfplumber
++import pytesseract
++from PIL import Image
++from pdf2image import convert_from_bytes
++import os
++import uuid
++import datetime
++import traceback
++import zipfile
++import re
+ 
+ load_dotenv()
+ app = FastAPI()
+ 
+ app.add_middleware(
+     CORSMiddleware,
+     allow_origins=["http://localhost:3000", "http://localhost:3001"],
+     allow_credentials=True,
+     allow_methods=["*"],
+     allow_headers=["*"],
+ )
+ 
+-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
++client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
++OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
+ 
+ def extrair_texto_pdf(file_bytes):
+     texto = ""
+     try:
+         with pdfplumber.open(file_bytes) as pdf:
+             for page in pdf.pages:
+                 texto += page.extract_text() or ""
+     except Exception:
+         pass
+ 
+     if not texto.strip():
+         imagens = convert_from_bytes(file_bytes)
+         for img in imagens:
+             texto += pytesseract.image_to_string(img)
+     return texto
+ 
+ def extrair_matricula(texto):
+-    padrao = r"matr[íi]cula(?: n[ºo]| número| nº)?[^\d]{0,3}(\d{3,})"
+-    resultado = re.search(padrao, texto, re.IGNORECASE)
+-    return resultado.group(1) if resultado else str(uuid.uuid4())[:8]
++    padrao = r"matr[íi]cula(?:\s*(?:n[ºo]|número|nº))?[^\d]{0,3}(\d{3,})"
++    m = re.search(padrao, texto, re.IGNORECASE)
++    return m.group(1) if m else str(uuid.uuid4())[:8]
+ 
+ def gerar_prompt(tipo: str, texto: str) -> str:
+     data = datetime.datetime.now()
+     hora_emissao = data.strftime("%H:%M:%S")
+     meses_pt = [
+         "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+         "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"
+     ]
+     data_extenso = f"{data.day} de {meses_pt[data.month - 1]} de {data.year}"
+ 
+     base_prompt = f"""
+ Você é um registrador do 6º Registro de Imóveis de Curitiba.
+ 
+ Analise a matrícula abaixo e, em texto corrido, elabore uma certidão da situação jurídica do imóvel, observando:
+ 
+ 1. Descreva o imóvel, localização e características.
+ 2. Informe o(s) proprietário(s) atual(is) e forma de aquisição.
+ 3. Aponte o histórico recente de registros.
+ 4. Indique se há algum dos seguintes ônus ou gravames vigentes: "regime de patrimônio de afetação imobiliária", "hipoteca", "alienação fiduciária", "penhora", "usufruto", "servidão", "ação real", "ação pessoal", "ação reipersecutória", "impenhorabilidade", "inalienabilidade", "anticrese", "gravame", "ônus". **Desconsidere quaisquer ônus que já tenham sido cancelados.**
+ 5. Além dos termos descritos, fique atento a qualquer outro caso de ônus ou gravame existente e também aos transportes de ônus ou gravames.
+ 6. Atentar para o fato de que, enquanto não forem expressamente cancelados, os ônus ou gravames continuam vigentes e devem ser mencionados na certidão.
+ 7. EM CASO DE SER UMA MATRÍCULA MÃE (IDENTIFICAR PELO REGISTRO DE UMA INCORPORAÇÃO IMOBILIÁRIA OU UMA INSTITUIÇÃO DE CONDOMÍNIO), RETORNAR O PDF ESCRITO SOMENTE: "MANDAR A MATRÍCULA FILHA"
+ 8. Se a matrícula enviada já estiver encerrada, mandar uma mensagem escrita antes da certidão: "A MATRÍCULA JÁ FOI ENCERRADA, A CERTIDÃO DE QUANDO ELA ESTAVA ATIVA SEGUE ABAIXO".
+ 
+ Ao final da certidão, inclua sempre:
+ 
+ Certifico, a requerimento de pessoa interessada, que, revendo os livros de registros imobiliários existentes nesta serventia, em relação ao imóvel constante da matrícula sob nº [NÚMERO], [DESCRIÇÃO DO IMÓVEL], de propriedade de [NOME E CPF DO PROPRIETÁRIO];
+ 
+ - Se não houver ônus: "NÃO CONSTAM quaisquer ônus, gravames, ações reais ou pessoais e reipersecutórias."
+ - Se houver ônus: repetir a frase acima e adicionar "a não ser: ..." com a lista.
+ 
+ Consulta a Central Nacional de Indisponibilidade de Bens – CNIB, códigos Hash: [HASH]. O referido é verdade e dou fé.
+ Curitiba – PR, {data_extenso}. Certidão emitida às {hora_emissao}.
+ 
+ A matrícula é:
+ 
+ {texto}
+ """
+     return base_prompt
+ 
+ @app.post("/api/processar-pdf")
+ async def processar_pdf(tipo: str = Form(...), files: list[UploadFile] = File(...)):
+     try:
+         nomes_pdfs = []
+ 
+         for file in files:
+             conteudo = await file.read()
+-            filename = file.filename.lower()
++            filename = (file.filename or "").lower()
+ 
+             if filename.endswith(".pdf"):
+                 texto = extrair_texto_pdf(conteudo)
+             elif filename.endswith(".tif") or filename.endswith(".tiff"):
+                 file.file.seek(0)
+                 imagem = Image.open(file.file)
+                 texto = pytesseract.image_to_string(imagem)
+             else:
+                 texto = ""
+ 
+             if not texto.strip():
+                 continue
+ 
+-            # Extração da matrícula para nome do arquivo
+-            matricula = extrair_matricula(texto)
+-            nome_pdf = f"resposta_{matricula}.pdf"
+-            nomes_pdfs.append(nome_pdf)
++            # Nome amigável pelo nº da matrícula
++            matricula = extrair_matricula(texto)
++            nome_pdf = f"certidao_{matricula}.pdf"
++            nomes_pdfs.append(nome_pdf)
+ 
+             prompt = gerar_prompt(tipo, texto)
+-            resposta = client.chat.completions.create(
+-                model="gpt-4o",
+-                messages=[
+-                    {"role": "system", "content": "Você é um registrador de imóveis experiente."},
+-                    {"role": "user", "content": prompt}
+-                ]
+-            )
+-            resultado = resposta.choices[0].message.content
++
++            # --- OpenAI call (Responses API preferencial, fallback Chat Completions) ---
++            try:
++                resposta = client.responses.create(
++                    model=OPENAI_MODEL,
++                    input=[
++                        {"role": "system", "content": [{"type": "text", "text": "Você é um registrador de imóveis experiente."}]},
++                        {"role": "user", "content": [{"type": "text", "text": prompt}]}
++                    ],
++                )
++                resultado = resposta.output[0].content[0].text
++            except Exception:
++                resposta = client.chat.completions.create(
++                    model=OPENAI_MODEL,
++                    messages=[
++                        {"role": "system", "content": "Você é um registrador de imóveis experiente."},
++                        {"role": "user", "content": prompt}
++                    ]
++                )
++                resultado = resposta.choices[0].message.content
+ 
+-            font_path = os.path.join(
++            font_path = os.path.join(
+                 os.path.dirname(__file__),
+                 "fonts",
+                 "dejavu-fonts-ttf-2.37",
+                 "dejavu-fonts-ttf-2.37",
+                 "ttf",
+                 "DejaVuSans.ttf"
+             )
+ 
+             pdf = FPDF()
+             pdf.add_page()
+             pdf.set_auto_page_break(auto=True, margin=15)
+-            pdf.add_font("DejaVu", "", font_path, uni=True)
+-            pdf.set_font("DejaVu", "", 12)
++            try:
++                pdf.add_font("DejaVu", "", font_path, uni=True)
++                pdf.set_font("DejaVu", "", 12)
++            except Exception:
++                pdf.set_font("Arial", size=12)
+ 
+             for linha in resultado.split("\n"):
+                 pdf.multi_cell(0, 10, txt=linha.strip())
+ 
+             pdf.output(nome_pdf)
+ 
+         if not nomes_pdfs:
+             return JSONResponse(status_code=400, content={"erro": "Nenhum texto válido extraído dos arquivos enviados."})
+ 
+         if len(nomes_pdfs) == 1:
+-            return FileResponse(nomes_pdfs[0], media_type="application/pdf", filename="certidao.pdf")
++            return FileResponse(nomes_pdfs[0], media_type="application/pdf", filename=nomes_pdfs[0])
+         else:
+             zip_path = f"certidoes_{uuid.uuid4().hex}.zip"
+             with zipfile.ZipFile(zip_path, "w") as zipf:
+                 for pdf in nomes_pdfs:
+                     zipf.write(pdf)
+             return FileResponse(zip_path, media_type="application/zip", filename="certidoes.zip")
+ 
+     except Exception as e:
+         print("Erro geral:", traceback.format_exc())
+         return JSONResponse(status_code=500, content={"erro": str(e)})
+diff --git a/postcss.config.js b/postcss.config.js
+new file mode 100644
+index 0000000..f2c2f2c
+--- /dev/null
++++ b/postcss.config.js
+@@ -0,0 +1,6 @@
++module.exports = {
++  plugins: {
++    tailwindcss: {},
++    autoprefixer: {},
++  },
++}
+diff --git a/tailwind.config.js b/tailwind.config.js
+new file mode 100644
+index 0000000..a1a1a1a
+--- /dev/null
++++ b/tailwind.config.js
+@@ -0,0 +1,8 @@
++/** @type {import('tailwindcss').Config} */
++module.exports = {
++  content: ["./src/**/*.{js,jsx}"],
++  theme: {
++    extend: {},
++  },
++  plugins: [],
++}
+diff --git a/public/index.html b/public/index.html
+index 3f3f3f3..8e8e8e8 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -1,7 +1,8 @@
+ <!DOCTYPE html>
+ <html lang="pt-br">
+   <head>
+     <meta charset="utf-8" />
+-    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
++    <!-- Favicon customizado -->
++    <link rel="icon" type="image/png" href="%PUBLIC_URL%/logo-registro.png" />
+     <meta name="viewport" content="width=device-width, initial-scale=1" />
+     <meta name="theme-color" content="#000000" />
+     <meta
+diff --git a/src/index.css b/src/index.css
+index 0c0c0c0..d1d1d1d 100644
+--- a/src/index.css
++++ b/src/index.css
+@@ -1,15 +1,7 @@
+-/* estilos anteriores (se existirem) */
++@tailwind base;
++@tailwind components;
++@tailwind utilities;
+ 
+-body {
+-  margin: 0;
+-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+-    sans-serif;
+-  -webkit-font-smoothing: antialiased;
+-  -moz-osx-font-smoothing: grayscale;
+-}
+-
+-code {
+-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+-    monospace;
+-}
++html, body, #root { height: 100%; }
+diff --git a/src/components/SpinnerLogo.js b/src/components/SpinnerLogo.js
+new file mode 100644
+index 0000000..ccccccc
+--- /dev/null
++++ b/src/components/SpinnerLogo.js
+@@ -0,0 +1,15 @@
++import React from "react";
++import "./spinner.css";
++
++export default function SpinnerLogo() {
++  return (
++    <div className="spinner-logo">
++      <h2><span className="blink">RIAI by NM</span></h2>
++    </div>
++  );
++}
+diff --git a/src/components/spinner.css b/src/components/spinner.css
+new file mode 100644
+index 0000000..ddddddd
+--- /dev/null
++++ b/src/components/spinner.css
+@@ -0,0 +1,20 @@
++.spinner-logo {
++  display: flex;
++  justify-content: center;
++  align-items: center;
++  height: 100px;
++  margin-top: 20px;
++}
++.blink {
++  animation: blink 1.4s infinite;
++  font-size: 1.6rem;
++  font-weight: 800;
++  color: #0c3b72;
++  letter-spacing: 0.5px;
++}
++@keyframes blink {
++  0%, 100% { opacity: 1; transform: scale(1); }
++  50% { opacity: .35; transform: scale(0.98); }
++}
+diff --git a/src/components/Certidao.js b/src/components/Certidao.js
+index 1111111..2222222 100644
+--- a/src/components/Certidao.js
++++ b/src/components/Certidao.js
+@@ -1,38 +1,74 @@
+-import React, { useState } from "react"; 
+-
+-export default function Certidao() {
+-  const [pdfFiles, setPdfFiles] = useState([]);
+-  const [loading, setLoading] = useState(false);
+-
+-  const handlePDFChange = (e) => {
+-    setPdfFiles([...e.target.files]);
+-  };
+-
+-  const handleEnviar = async () => {
+-    console.log("Enviando PDFs...");
+-
+-    if (!pdfFiles.length) return;
+-
+-    try {
+-      setLoading(true);
+-      const formData = new FormData();
+-      pdfFiles.forEach((file) => formData.append("files", file));
+-      formData.append("tipo", "certidao");
+-
+-      const response = await fetch("http://localhost:8000/api/processar-pdf", {
+-        method: "POST",
+-        body: formData,
+-      });
+-
+-      if (!response.ok) {
+-        throw new Error("Erro ao processar PDFs");
+-      }
+-
+-      const blob = await response.blob();
+-      const contentType = response.headers.get("content-type");
+-      const isZip = contentType.includes("application/zip");
+-      const filename = isZip ? "certidoes.zip" : "certidao.pdf";
+-
+-      const url = window.URL.createObjectURL(blob);
+-      const link = document.createElement("a");
+-      link.href = url;
+-      link.setAttribute("download", filename);
+-      document.body.appendChild(link);
+-      link.click();
+-      link.remove();
+-
+-      console.log("PDF(s) recebidos com sucesso!");
+-    } catch (error) {
+-      console.error("Erro ao enviar os PDFs:", error);
+-      alert("Falha ao gerar a(s) certidão(ões).");
+-    } finally {
+-      setLoading(false);
+-    }
+-  };
+-
+-  return (
+-    <div style={{ padding: "1rem" }}>
+-      <h2>Emitir Certidão (Múltiplos PDFs)</h2>
+-      <input type="file" accept=".pdf" multiple onChange={handlePDFChange} />
+-      <button onClick={handleEnviar} disabled={loading || !pdfFiles.length}>
+-        {loading ? "Processando..." : "Enviar PDFs"}
+-      </button>
+-    </div>
+-  );
+-}
++import React, { useState } from "react";
++import SpinnerLogo from "./SpinnerLogo";
++import "./spinner.css";
++
++export default function Certidao() {
++  const [pdfFiles, setPdfFiles] = useState([]);
++  const [loading, setLoading] = useState(false);
++
++  const handlePDFChange = (e) => setPdfFiles([...e.target.files]);
++
++  const handleEnviar = async () => {
++    if (!pdfFiles.length) return;
++    try {
++      setLoading(true);
++      const formData = new FormData();
++      pdfFiles.forEach((file) => formData.append("files", file));
++      formData.append("tipo", "certidao");
++
++      const response = await fetch("http://localhost:8000/api/processar-pdf", {
++        method: "POST",
++        body: formData,
++      });
++
++      if (!response.ok) throw new Error("Erro ao processar PDFs");
++
++      const blob = await response.blob();
++      const contentType = response.headers.get("content-type") || "";
++      const isZip = contentType.includes("application/zip");
++      const filename = isZip ? "certidoes.zip" : "certidao.pdf";
++
++      const url = window.URL.createObjectURL(blob);
++      const link = document.createElement("a");
++      link.href = url;
++      link.setAttribute("download", filename);
++      document.body.appendChild(link);
++      link.click();
++      link.remove();
++    } catch (error) {
++      console.error("Erro ao enviar os PDFs:", error);
++      alert("Falha ao gerar a(s) certidão(ões).");
++    } finally {
++      setLoading(false);
++    }
++  };
++
++  return (
++    <div className="p-4 bg-gray-50 rounded-xl shadow">
++      <h2 className="text-xl font-semibold mb-2">Emitir Certidão (PDF/TIFF)</h2>
++      <input
++        type="file"
++        accept=".pdf,.tif,.tiff"
++        multiple
++        onChange={handlePDFChange}
++        className="mb-3"
++      />
++      {loading ? (
++        <SpinnerLogo />
++      ) : (
++        <button
++          onClick={handleEnviar}
++          disabled={!pdfFiles.length}
++          className="px-4 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-50"
++        >
++          Gerar Certidão
++        </button>
++      )}
++    </div>
++  );
++}
+diff --git a/src/components/Escritura.js b/src/components/Escritura.js
+index aaaaaaa..bbbbbbb 100644
+--- a/src/components/Escritura.js
++++ b/src/components/Escritura.js
+@@ -1,3 +1,88 @@
+-import React from "react";
+-export default function Escritura(){ return <div>TODO</div>; }
++import React, { useState } from "react";
++import SpinnerLogo from "./SpinnerLogo";
++import "./spinner.css";
++
++export default function Escritura() {
++  const [files, setFiles] = useState([]);
++  const [loading, setLoading] = useState(false);
++
++  const handleChange = (e) => setFiles([...e.target.files]);
++
++  const handleEnviar = async () => {
++    if (!files.length) return;
++    try {
++      setLoading(true);
++      const formData = new FormData();
++      files.forEach((f) => formData.append("files", f));
++      formData.append("tipo", "escritura");
++
++      const resp = await fetch("http://localhost:8000/api/processar-pdf", {
++        method: "POST",
++        body: formData,
++      });
++      if (!resp.ok) throw new Error("Erro ao processar");
++
++      const blob = await resp.blob();
++      const isZip = (resp.headers.get("content-type") || "").includes("application/zip");
++      const filename = isZip ? "escrituras.zip" : "escritura.pdf";
++
++      const url = window.URL.createObjectURL(blob);
++      const a = document.createElement("a");
++      a.href = url; a.setAttribute("download", filename);
++      document.body.appendChild(a); a.click(); a.remove();
++    } catch (e) {
++      console.error(e);
++      alert("Falha ao gerar análise de escritura.");
++    } finally {
++      setLoading(false);
++    }
++  };
++
++  return (
++    <div className="p-4 bg-gray-50 rounded-xl shadow mt-6">
++      <h2 className="text-xl font-semibold mb-2">Analisar Escritura (PDF/TIFF)</h2>
++      <input type="file" accept=".pdf,.tif,.tiff" multiple onChange={handleChange} className="mb-3" />
++      {loading ? (
++        <SpinnerLogo />
++      ) : (
++        <button
++          onClick={handleEnviar}
++          disabled={!files.length}
++          className="px-4 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-50"
++        >
++          Gerar Análise
++        </button>
++      )}
++    </div>
++  );
++}
+diff --git a/src/components/Verificacao.js b/src/components/Verificacao.js
+index aaaaaaa..bbbbbbb 100644
+--- a/src/components/Verificacao.js
++++ b/src/components/Verificacao.js
+@@ -1,3 +1,88 @@
+-import React from "react";
+-export default function Verificacao(){ return <div>TODO</div>; }
++import React, { useState } from "react";
++import SpinnerLogo from "./SpinnerLogo";
++import "./spinner.css";
++
++export default function Verificacao() {
++  const [files, setFiles] = useState([]);
++  const [loading, setLoading] = useState(false);
++
++  const handleChange = (e) => setFiles([...e.target.files]);
++
++  const handleEnviar = async () => {
++    if (!files.length) return;
++    try {
++      setLoading(true);
++      const formData = new FormData();
++      files.forEach((f) => formData.append("files", f));
++      formData.append("tipo", "verificar");
++
++      const resp = await fetch("http://localhost:8000/api/processar-pdf", {
++        method: "POST",
++        body: formData,
++      });
++      if (!resp.ok) throw new Error("Erro ao processar");
++
++      const blob = await resp.blob();
++      const isZip = (resp.headers.get("content-type") || "").includes("application/zip");
++      const filename = isZip ? "verificacoes.zip" : "verificacao.pdf";
++
++      const url = window.URL.createObjectURL(blob);
++      const a = document.createElement("a");
++      a.href = url; a.setAttribute("download", filename);
++      document.body.appendChild(a); a.click(); a.remove();
++    } catch (e) {
++      console.error(e);
++      alert("Falha ao verificar documento.");
++    } finally {
++      setLoading(false);
++    }
++  };
++
++  return (
++    <div className="p-4 bg-gray-50 rounded-xl shadow mt-6">
++      <h2 className="text-xl font-semibold mb-2">Verificar Documento (PDF/TIFF)</h2>
++      <input type="file" accept=".pdf,.tif,.tiff" multiple onChange={handleChange} className="mb-3" />
++      {loading ? (
++        <SpinnerLogo />
++      ) : (
++        <button
++          onClick={handleEnviar}
++          disabled={!files.length}
++          className="px-4 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-50"
++        >
++          Verificar
++        </button>
++      )}
++    </div>
++  );
++}
