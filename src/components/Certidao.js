@@ -1,67 +1,115 @@
 import React, { useState } from "react";
-import SpinnerLogo from "../components/SpinnerLogo";
+import SpinnerLogo from "./SpinnerLogo";
 
-export default function Certidao() {
-  const [pdfFiles, setPdfFiles] = useState([]);
+export default function Escritura() {
+  const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  const handlePDFChange = (e) => {
-    setPdfFiles([...e.target.files]);
+  const handleChange = (e) => {
+    const picked = Array.from(e.target.files || []);
+    if (picked.length) setFiles(picked);
+    e.target.value = "";
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const dropped = Array.from(e.dataTransfer.files || []);
+    const filtered = dropped.filter((f) =>
+      [".pdf", ".tif", ".tiff"].some((ext) => f.name.toLowerCase().endsWith(ext))
+    );
+    if (filtered.length) setFiles(filtered);
   };
 
   const handleEnviar = async () => {
-    console.log("Enviando PDFs...");
-
-    if (!pdfFiles.length) return;
-
+    if (!files.length) return;
     try {
       setLoading(true);
       const formData = new FormData();
-      pdfFiles.forEach((file) => formData.append("files", file));
-      formData.append("tipo", "certidao");
+      files.forEach((f) => formData.append("files", f));
+      formData.append("tipo", "escritura");
 
-      const response = await fetch("http://localhost:8000/api/processar-pdf", {
+      const res = await fetch("http://localhost:8000/api/processar-pdf", {
         method: "POST",
         body: formData,
       });
+      if (!res.ok) throw new Error("Erro ao processar");
 
-      if (!response.ok) {
-        throw new Error("Erro ao processar PDFs");
-      }
-
-      const blob = await response.blob();
-      const contentType = response.headers.get("content-type");
+      const blob = await res.blob();
+      const contentType = res.headers.get("content-type") || "";
       const isZip = contentType.includes("application/zip");
-      const filename = isZip ? "certidoes.zip" : "certidao.pdf";
+      const filename = isZip ? "escrituras.zip" : "escritura.pdf";
 
       const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", filename);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-
-      console.log("PDF(s) recebidos com sucesso!");
-    } catch (error) {
-      console.error("Erro ao enviar os PDFs:", error);
-      alert("Falha ao gerar a(s) certidão(ões).");
+      const a = document.createElement("a");
+      a.href = url;
+      a.setAttribute("download", filename);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      console.error(e);
+      alert("Falha ao gerar a(s) escritura(s).");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={{ padding: "1rem" }}>
-      <h2>Emitir Certidão (Múltiplos PDFs)</h2>
-      <input type="file" accept=".pdf,.tif,.tiff" multiple onChange={handlePDFChange} />
-      {loading ? (
-        <SpinnerLogo />
-      ) : (
-        <button onClick={handleEnviar} disabled={!pdfFiles.length}>
-          Gerar Certidão
-        </button>
-      )}
-    </div>
+    <main className="container">
+      <div className="panel">
+        <h2>Analisar Escritura</h2>
+
+        <label
+          htmlFor="escritura-files"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
+          className="dropzone"
+        >
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 28 }}>⬇️</div>
+            <p>Solte PDFs ou TIFF<br /><small>(ou clique para escolher)</small></p>
+          </div>
+        </label>
+
+        <input
+          id="escritura-files"
+          type="file"
+          accept=".pdf,.tif,.tiff"
+          multiple
+          hidden
+          onChange={handleChange}
+        />
+
+        {files.length > 0 && (
+          <ul className="file-list">
+            {files.map((f, i) => <li key={i}>• {f.name}</li>)}
+          </ul>
+        )}
+
+        <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+          {loading ? (
+            <div className="spinner-wrap"><SpinnerLogo /></div>
+          ) : (
+            <>
+              <button
+                onClick={handleEnviar}
+                disabled={!files.length}
+                className="btn btn-green"
+              >
+                Gerar Escritura
+              </button>
+              <button
+                onClick={() => setFiles([])}
+                disabled={!files.length}
+                className="btn"
+                style={{ background: "#e2e8f0", color: "#0f172a" }}
+              >
+                Limpar
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </main>
   );
 }

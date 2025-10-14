@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from fpdf import FPDF
 import pdfplumber
 import pytesseract
-from PIL import Image
+from PIL import Image, ImageSequence
 from pdf2image import convert_from_bytes
 import os
 import uuid
@@ -28,7 +28,22 @@ app.add_middleware(
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def extrair_texto_pdf(file_bytes):
+# ---------- Utilidades ----------
+
+def _pt_data_extenso_e_hora():
+    agora = datetime.datetime.now()
+    meses_pt = [
+        "janeiro","fevereiro","março","abril","maio","junho",
+        "julho","agosto","setembro","outubro","novembro","dezembro"
+    ]
+    data_extenso = f"{agora.day} de {meses_pt[agora.month - 1]} de {agora.year}"
+    hora = agora.strftime("%H:%M:%S")
+    return data_extenso, hora
+
+def extrair_texto_pdf(file_bytes: bytes) -> str:
+    """
+    Tenta extrair com pdfplumber; se falhar ou vier vazio, faz OCR nas páginas convertidas via pdf2image.
+    """
     texto = ""
     try:
         with pdfplumber.open(file_bytes) as pdf:
@@ -38,24 +53,38 @@ def extrair_texto_pdf(file_bytes):
         pass
 
     if not texto.strip():
-        imagens = convert_from_bytes(file_bytes)
-        for img in imagens:
-            texto += pytesseract.image_to_string(img)
+        try:
+            imagens = convert_from_bytes(file_bytes)
+            for img in imagens:
+                texto += pytesseract.image_to_string(img)
+        except Exception:
+            pass
     return texto
 
-def extrair_matricula(texto):
-    padrao = r"matr[íi]cula(?: n[ºo]| número| nº)?[^\d]{0,3}(\d{3,})"
-    resultado = re.search(padrao, texto, re.IGNORECASE)
-    return resultado.group(1) if resultado else str(uuid.uuid4())[:8]
+def extrair_texto_tiff(upload: UploadFile) -> str:
+    """
+    OCR para .tif/.tiff, suportando multi-página.
+    """
+    try:
+        upload.file.seek(0)
+        img = Image.open(upload.file)
+        texto = ""
+        for frame in ImageSequence.Iterator(img):
+            texto += pytesseract.image_to_string(frame)
+        return texto
+    except Exception:
+        return ""
+
+def extrair_matricula(texto: str) -> str:
+    """
+    Captura padrões como: matrícula nº 12345 / matricula n° 123 / matrícula número 000123 / etc.
+    """
+    padrao = r"matr[íi]cula(?:\s*(?:n[ºo]|n[oº]\.?|número|nº))?\s*[:\-]?\s*(\d{3,})"
+    m = re.search(padrao, texto, re.IGNORECASE)
+    return m.group(1) if m else str(uuid.uuid4())[:8]
 
 def gerar_prompt(tipo: str, texto: str) -> str:
-    data = datetime.datetime.now()
-    hora_emissao = data.strftime("%H:%M:%S")
-    meses_pt = [
-        "janeiro", "fevereiro", "março", "abril", "maio", "junho",
-        "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"
-    ]
-    data_extenso = f"{data.day} de {meses_pt[data.month - 1]} de {data.year}"
+    data_extenso, hora_emissao = _pt_data_extenso_e_hora()
 
     base_prompt = f"""
 Você é um registrador do 6º Registro de Imóveis de Curitiba.
@@ -67,19 +96,18 @@ Analise a matrícula abaixo e, em texto corrido, elabore uma certidão da situa�
 3. Aponte o histórico recente de registros.
 4. Indique se há algum dos seguintes ônus ou gravames vigentes: "regime de patrimônio de afetação imobiliária", "hipoteca", "alienação fiduciária", "penhora", "usufruto", "servidão", "ação real", "ação pessoal", "ação reipersecutória", "impenhorabilidade", "inalienabilidade", "anticrese", "gravame", "ônus". **Desconsidere quaisquer ônus que já tenham sido cancelados.**
 5. Além dos termos descritos, fique atento a qualquer outro caso de ônus ou gravame existente e também aos transportes de ônus ou gravames.
-6. Atentar para o fato de que, enquanto não forem expressamente cancelados, os ônus ou gravames continuam vigentes e devem ser mencionados na certidão.
-7. EM CASO DE SER UMA MATRÍCULA MÃE (IDENTIFICAR PELO REGISTRO DE UMA INCORPORAÇÃO IMOBILIÁRIA OU UMA INSTITUIÇÃO DE CONDOMÍNIO), RETORNAR O PDF ESCRITO SOMENTE: "MANDAR A MATRÍCULA FILHA"
-8. Se a matrícula enviada já estiver encerrada, mandar uma mensagem escrita antes da certidão: "A MATRÍCULA JÁ FOI ENCERRADA, A CERTIDÃO DE QUANDO ELA ESTAVA ATIVA SEGUE ABAIXO".
-9. Lembre-se de que pacto antenupcial não é considarado ônus.
+6. Atentar que, enquanto não forem expressamente cancelados, os ônus ou gravames continuam vigentes e devem ser mencionados.
+7. SE FOR MATRÍCULA MÃE (ex.: incorporação imobiliária ou instituição de condomínio), RETORNAR SOMENTE: "MANDAR A MATRÍCULA FILHA".
+8. Se a matrícula enviada já estiver encerrada, escrever ANTES da certidão: "A MATRÍCULA JÁ FOI ENCERRADA, A CERTIDÃO DE QUANDO ELA ESTAVA ATIVA SEGUE ABAIXO".
 
-Ao final da certidão, inclua sempre:
+No fim, use exatamente este modelo:
 
 Certifico, a requerimento de pessoa interessada, que, revendo os livros de registros imobiliários existentes nesta serventia, em relação ao imóvel constante da matrícula sob nº [NÚMERO], [DESCRIÇÃO DO IMÓVEL], de propriedade de [NOME E CPF DO PROPRIETÁRIO];
 
 - Se não houver ônus: "NÃO CONSTAM quaisquer ônus, gravames, ações reais ou pessoais e reipersecutórias."
 - Se houver ônus: repetir a frase acima e adicionar "a não ser: ..." com a lista.
 
-O referido é verdade e dou fé.
+Consulta a Central Nacional de Indisponibilidade de Bens – CNIB, códigos Hash: [HASH]. O referido é verdade e dou fé.
 Curitiba – PR, {data_extenso}. Certidão emitida às {hora_emissao}.
 
 A matrícula é:
@@ -88,6 +116,39 @@ A matrícula é:
 """
     return base_prompt
 
+def _font_path_dejavu() -> str:
+    """
+    Resolve o caminho do DejaVuSans.ttf conforme sua estrutura de pastas.
+    """
+    here = os.path.dirname(__file__)
+    candidatos = [
+        os.path.join(here, "fonts", "dejavu-fonts-ttf-2.37", "dejavu-fonts-ttf-2.37", "ttf", "DejaVuSans.ttf"),
+        os.path.join(here, "fonts", "dejavu-fonts-ttf-2.37", "ttf", "DejaVuSans.ttf"),
+        os.path.join(here, "fonts", "DejaVuSans.ttf"),
+    ]
+    for p in candidatos:
+        if os.path.exists(p):
+            return p
+    # como último recurso, tente no cwd
+    fallback = os.path.join(os.getcwd(), "backend", "fonts", "dejavu-fonts-ttf-2.37", "ttf", "DejaVuSans.ttf")
+    if os.path.exists(fallback):
+        return fallback
+    raise RuntimeError("DejaVuSans.ttf não encontrado. Verifique a pasta backend/fonts/...")
+
+def _gerar_pdf(texto_certidao: str, nome_pdf: str):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    # fonte com acentos
+    fonte = _font_path_dejavu()
+    pdf.add_font("DejaVu", "", fonte, uni=True)
+    pdf.set_font("DejaVu", "", 12)
+    for linha in texto_certidao.split("\n"):
+        pdf.multi_cell(0, 8, txt=linha.strip())
+    pdf.output(nome_pdf)
+
+# ---------- Endpoint ----------
+
 @app.post("/api/processar-pdf")
 async def processar_pdf(tipo: str = Form(...), files: list[UploadFile] = File(...)):
     try:
@@ -95,53 +156,77 @@ async def processar_pdf(tipo: str = Form(...), files: list[UploadFile] = File(..
 
         for file in files:
             conteudo = await file.read()
-            filename = file.filename.lower()
+            filename = (file.filename or "").lower()
 
+            # 1) extrair texto conforme extensão
             if filename.endswith(".pdf"):
                 texto = extrair_texto_pdf(conteudo)
             elif filename.endswith(".tif") or filename.endswith(".tiff"):
-                file.file.seek(0)
-                imagem = Image.open(file.file)
-                texto = pytesseract.image_to_string(imagem)
+                texto = extrair_texto_tiff(file)
             else:
-                texto = ""
+                # tenta OCR genérico via PIL
+                try:
+                    file.file.seek(0)
+                    img = Image.open(file.file)
+                    texto = pytesseract.image_to_string(img)
+                except Exception:
+                    texto = ""
 
             if not texto.strip():
+                # ignora arquivos sem texto extraído
                 continue
 
+            # 2) extrair matrícula p/ nome do arquivo
             matricula = extrair_matricula(texto)
-            nome_pdf = f"certidao_{matricula}.pdf"
-            nomes_pdfs.append(nome_pdf)
 
+            # 3) montar prompt
             prompt = gerar_prompt(tipo, texto)
-            resposta = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": "Você é um registrador de imóveis experiente."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            resultado = resposta.choices[0].message.content
 
-            font_path = os.path.join(
-                os.path.dirname(__file__),
-                "fonts",
-                "dejavu-fonts-ttf-2.37",
-                "dejavu-fonts-ttf-2.37",
-                "ttf",
-                "DejaVuSans.ttf"
-            )
+            # 4) chamar a IA (Responses API com fallbacks)
+            try:
+                resposta = client.responses.create(
+                    model="gpt-5",
+                    input=[
+                        {"role": "system", "content": "Você é um registrador de imóveis experiente."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.2,
+                )
+                try:
+                    resultado = resposta.output[0].content[0].text
+                except Exception:
+                    resultado = getattr(resposta, "output_text", None) or str(resposta)
+            except Exception:
+                try:
+                    resposta = client.responses.create(
+                        model="gpt-4.1-mini",
+                        input=[
+                            {"role": "system", "content": "Você é um registrador de imóveis experiente."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.2,
+                    )
+                    try:
+                        resultado = resposta.output[0].content[0].text
+                    except Exception:
+                        resultado = getattr(resposta, "output_text", None) or str(resposta)
+                except Exception:
+                    # fallback legado
+                    resposta = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": "Você é um registrador de imóveis experiente."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.2,
+                    )
+                    resultado = resposta.choices[0].message.content
 
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_auto_page_break(auto=True, margin=15)
-            pdf.add_font("DejaVu", "", font_path, uni=True)
-            pdf.set_font("DejaVu", "", 12)
-
-            for linha in resultado.split("\n"):
-                pdf.multi_cell(0, 10, txt=linha.strip())
-
-            pdf.output(nome_pdf)
+            # 5) gerar PDF com nomeado pela matrícula
+            # Se você prefere com acento, troque por f"certidão_{matricula}.pdf"
+            nome_pdf = f"certidao_{matricula}.pdf"
+            _gerar_pdf(resultado, nome_pdf)
+            nomes_pdfs.append(nome_pdf)
 
         if not nomes_pdfs:
             return JSONResponse(status_code=400, content={"erro": "Nenhum texto válido extraído dos arquivos enviados."})

@@ -1,27 +1,21 @@
-import React, { useEffect, useState } from "react";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
-import Login from "./pages/Login";
+// src/App.js
+import React from "react";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+
 import Riai from "./pages/Riai";
+import Certidao from "./components/Certidao";
+import Escritura from "./components/Escritura";
+import Verificacao from "./components/Verificacao";
 
-function App() {
-  const [usuario, setUsuario] = useState(null);
-  const [carregando, setCarregando] = useState(true);
-
-  useEffect(() => {
-    const auth = getAuth();
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUsuario(user);
-      setCarregando(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  if (carregando) {
-    return <p>Carregando...</p>;
-  }
-
-  return <div className="App">{usuario ? <Riai /> : <Login />}</div>;
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Riai />} />
+        <Route path="/certidao" element={<Certidao />} />
+        <Route path="/escritura" element={<Escritura />} />
+        <Route path="/verificar" element={<Verificacao />} />
+      </Routes>
+    </BrowserRouter>
+  );
 }
-
-export default App;
-

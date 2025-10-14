@@ -1,13 +1,152 @@
+/* ========== RESET BÁSICO ========== */
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", sans-serif;
+  color: #0f172a; /* slate-900 */
+  background: linear-gradient(135deg, #eef2ff 0%, #f0f9ff 40%, #e0f2fe 100%);
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+/* ========== CONTAINER ========== */
+.container {
+  max-width: 72rem; /* ~1152px */
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+/* ========== HEADER ========== */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: rgba(255, 255, 255, 0.7);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.6); /* slate-200/60 */
+  backdrop-filter: blur(8px);
+}
+.header-inner {
+  max-width: 80rem;
+  margin: 0 auto;
+  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.header-logo {
+  height: 40px;
+  width: auto;
+}
+.header-title {
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+/* ========== HERO BOX ========== */
+.hero {
+  max-width: 64rem;
+  margin: 2rem auto 0;
+  background: rgba(255,255,255,0.7);
+  border: 1px solid rgba(255,255,255,0.7);
+  backdrop-filter: blur(10px);
+  border-radius: 24px;
+  padding: 2rem;
+  box-shadow: 0 25px 50px -12px rgba(0,0,0,0.15);
+  text-align: center;
+}
+.hero h1 {
+  margin: 0;
+  font-size: clamp(2rem, 2.5vw, 3rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.hero p {
+  margin-top: 0.5rem;
+  color: #475569; /* slate-600 */
+  font-size: 1.1rem;
+}
+
+/* ========== GRID DE CARDS ========== */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+@media (min-width: 768px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1024px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+
+/* ========== CARD ========== */
+.card {
+  background: rgba(255,255,255,0.92);
+  border: 1px solid #e2e8f0; /* slate-200 */
+  border-radius: 18px;
+  padding: 1.25rem;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+  transition: transform .15s ease, box-shadow .2s ease;
+}
+.card:hover { transform: translateY(-2px); box-shadow: 0 16px 30px rgba(15, 23, 42, 0.12); }
+.card h3 { margin: 0 0 0.5rem; font-size: 1.15rem; font-weight: 700; }
+
+/* ========== DROPZONE ========== */
+.dropzone {
+  margin-top: 0.75rem;
+  height: 9rem;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  border: 2px dashed #cbd5e1; /* slate-300 */
+  background: #f8fafc; /* slate-50 */
+  border-radius: 14px;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.dropzone:hover { border-color: #3b82f6; background: #eff6ff; } /* azul leve */
+.dropzone p { margin: .35rem 0 0; color: #64748b; } /* slate-500 */
+.dropzone small { color: #94a3b8; } /* slate-400 */
+
+/* ========== BOTÕES ========== */
+.btn {
+  display: inline-block;
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  padding: .85rem 1rem;
+  margin-top: .9rem;
+  font-weight: 600;
+  color: white;
+  cursor: pointer;
+  transition: filter .15s ease, transform .02s ease;
+}
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn:active { transform: translateY(1px); }
+
+.btn-blue  { background: #2563eb; } .btn-blue:hover  { filter: brightness(1.05); }
+.btn-green { background: #16a34a; } .btn-green:hover { filter: brightness(1.05); }
+.btn-amber { background: #f59e0b; } .btn-amber:hover { filter: brightness(1.05); }
+
+/* ========== LISTA DE ARQUIVOS ========== */
+.file-list { margin-top: .75rem; font-size: .92rem; color: #334155; } /* slate-700 */
+.file-list li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ========== WRAPPERS DE PÁGINA DE FUNÇÃO ========== */
+.panel {
+  max-width: 48rem; /* ~768px */
+  margin: 1.5rem auto 0;
+  background: rgba(255,255,255,0.92);
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 1.25rem;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+}
+.panel h2 { margin: 0; font-size: 1.35rem; font-weight: 800; }
+
+/* ========== SPINNER PLACEHOLDER ========== */
+.spinner-wrap {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 48px;
+  background: #f1f5f9; /* slate-100 */
+  border-radius: 12px;
 }

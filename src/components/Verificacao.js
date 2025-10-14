@@ -1,45 +1,115 @@
 import React, { useState } from "react";
+import SpinnerLogo from "./SpinnerLogo";
 
 export default function Verificacao() {
-  const [pdfFile, setPdfFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  const handlePDFChange = (e) => {
-    setPdfFile(e.target.files[0]);
+  const handleChange = (e) => {
+    const picked = Array.from(e.target.files || []);
+    if (picked.length) setFiles(picked);
+    e.target.value = "";
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const dropped = Array.from(e.dataTransfer.files || []);
+    const filtered = dropped.filter((f) =>
+      [".pdf", ".tif", ".tiff"].some((ext) => f.name.toLowerCase().endsWith(ext))
+    );
+    if (filtered.length) setFiles(filtered);
   };
 
   const handleEnviar = async () => {
-    if (!pdfFile) return;
+    if (!files.length) return;
+    try {
+      setLoading(true);
+      const formData = new FormData();
+      files.forEach((f) => formData.append("files", f));
+      formData.append("tipo", "verificar");
 
-    setLoading(true);
-    const formData = new FormData();
-    formData.append("file", pdfFile);
-    formData.append("tipo", "verificar");
+      const res = await fetch("http://localhost:8000/api/processar-pdf", {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) throw new Error("Erro ao processar");
 
-    const response = await fetch("http://localhost:8000/api/processar-pdf", {
-      method: "POST",
-      body: formData,
-    });
+      const blob = await res.blob();
+      const contentType = res.headers.get("content-type") || "";
+      const isZip = contentType.includes("application/zip");
+      const filename = isZip ? "verificacoes.zip" : "verificacao.pdf";
 
-    const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", "verificacao.pdf");
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-
-    setLoading(false);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.setAttribute("download", filename);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      console.error(e);
+      alert("Falha ao verificar documento(s).");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div style={{ padding: "1rem", marginTop: "2rem" }}>
-      <h2>Verificar Documento (PDF)</h2>
-      <input type="file" accept=".pdf" onChange={handlePDFChange} />
-      <button onClick={handleEnviar} disabled={loading || !pdfFile}>
-        {loading ? "Processando..." : "Enviar PDF"}
-      </button>
-    </div>
+    <main className="container">
+      <div className="panel">
+        <h2>Verificação de Documentos</h2>
+
+        <label
+          htmlFor="verif-files"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
+          className="dropzone"
+        >
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 28 }}>⬇️</div>
+            <p>Solte PDFs ou TIFF<br /><small>(ou clique para escolher)</small></p>
+          </div>
+        </label>
+
+        <input
+          id="verif-files"
+          type="file"
+          accept=".pdf,.tif,.tiff"
+          multiple
+          hidden
+          onChange={handleChange}
+        />
+
+        {files.length > 0 && (
+          <ul className="file-list">
+            {files.map((f, i) => <li key={i}>• {f.name}</li>)}
+          </ul>
+        )}
+
+        <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+          {loading ? (
+            <div className="spinner-wrap"><SpinnerLogo /></div>
+          ) : (
+            <>
+              <button
+                onClick={handleEnviar}
+                disabled={!files.length}
+                className="btn btn-amber"
+              >
+                Verificar
+              </button>
+              <button
+                onClick={() => setFiles([])}
+                disabled={!files.length}
+                className="btn"
+                style={{ background: "#e2e8f0", color: "#0f172a" }}
+              >
+                Limpar
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </main>
   );
 }
