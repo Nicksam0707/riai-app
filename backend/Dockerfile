@@ -6,9 +6,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System deps for pdf/ocr
+# System deps for pdf/ocr and image libs
 RUN apt-get update && apt-get install -y \
-    poppler-utils tesseract-ocr libglib2.0-0 libsm6 libxext6 libxrender1 \
+    poppler-utils tesseract-ocr \
+    libglib2.0-0 libsm6 libxext6 libxrender1 \
+    libjpeg-dev zlib1g-dev libpng-dev libtiff5 libfreetype6-dev \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
