@@ -1,4 +1,4 @@
-// Frontend Dockerfile
+# Frontend Dockerfile
 FROM node:20-alpine as build
 WORKDIR /app
 COPY package.json package-lock.json* yarn.lock* pnpm-lock.yaml* ./
