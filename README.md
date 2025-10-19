@@ -1,70 +1,70 @@
-# Getting Started with Create React App
+# RIAI App (Frontend + FastAPI Backend)
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+AI-assisted analysis of Escrituras and emissão de Certidão do ônus. Frontend em React, backend em FastAPI com OpenAI.
 
-## Available Scripts
+## Estrutura
 
-In the project directory, you can run:
+- Frontend (React): `src/`, `public/`, `Dockerfile` (raiz)
+- Backend (FastAPI): `backend/` (inclui OCR/PDF libs, `requirements.txt`, `Dockerfile`)
+- Deploy: `render.yaml` (Blueprint com 2 serviços)
 
-### `npm start`
+## Pré-requisitos
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+- Node.js 18+ e npm
+- Python 3.11+ (para rodar o backend localmente)
+- OpenAI API key
+- poppler e tesseract (para OCR local; já inclusos no Docker do backend)
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+## Configuração de ambiente
 
-### `npm test`
+1) Copie `backend/.env.example` para `backend/.env` e preencha:
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+```
+OPENAI_API_KEY=seu_token
+GUIA_IRIB_FILE_ID=opcional
+MODEL_CERTIDAO=gpt-5-mini
+MODEL_ESCRITURA=gpt-5-mini
+DEBUG=false
+```
 
-### `npm run build`
+2) (Opcional) Faça upload do Guia IRIB para usar como attachment no fluxo de Escritura:
+- Coloque o PDF em `backend/attachments/Guia_IRIB.pdf`
+- Rode `python backend/upload_guia_irib.py` e copie o `file_id` para `GUIA_IRIB_FILE_ID`.
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## Rodando localmente
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+Backend:
+1) Instale dependências: `pip install -r backend/requirements.txt`
+2) Inicie: `uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000`
+3) Verifique: abra `http://127.0.0.1:8000/docs`
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+Frontend:
+1) Instale: `npm install`
+2) Inicie: `npm start`
+3) O app abre em `http://localhost:3000`
 
-### `npm run eject`
+Obs.: O frontend usa `REACT_APP_API_BASE_URL` (em build) ou fallback `http://127.0.0.1:8000` para desenvolvimento.
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+## Deploy na Render (Blueprint)
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+1) Faça push do repositório para o GitHub.
+2) Em Render, crie um Blueprint apontando para este repo (arquivo `render.yaml`).
+3) Configure as env vars do backend (serviço `riai-backend`):
+	- `OPENAI_API_KEY` (Required)
+	- `GUIA_IRIB_FILE_ID` (Opcional, se tiver subido o PDF)
+	- `MODEL_CERTIDAO` = gpt-5-mini
+	- `MODEL_ESCRITURA` = gpt-5-mini
+4) O serviço `riai-frontend` já passa `REACT_APP_API_BASE_URL` apontando para o backend.
+5) Depois do deploy:
+	- Teste o backend em `https://<backend>.onrender.com/docs`
+	- Abra o frontend e valide os fluxos (upload, geração de PDF/ZIP).
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+## Dicas / Troubleshooting
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+- CORS: O backend está com `allow_origins=["*"]` e `allow_credentials=false`. Use o mesmo host (localhost ou 127.0.0.1) durante dev.
+- Limpeza de arquivos: PDFs/ZIPs gerados são removidos automaticamente após alguns segundos, depois do download.
+- Erros da IA: O backend tenta uma cadeia de fallbacks. Se todos falharem, retorna 502 com detalhes. Ative `DEBUG=true` para mais logs.
 
-## Learn More
+## Licença
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Uso interno/experimental.

@@ -1,7 +1,10 @@
+# ATENÇÃO: Para evitar erro de CORS, acesse o backend via http://localhost:8000 no frontend (não use http://127.0.0.1:8000)
+import os
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from openai import OpenAI
+GUIA_IRIB_FILE_ID = os.getenv("GUIA_IRIB_FILE_ID")  # Coloque o file_id do guia IRIB aqui
 from dotenv import load_dotenv
 from fpdf import FPDF
 import pdfplumber
@@ -16,12 +19,16 @@ import zipfile
 import re
 
 load_dotenv()
+# Modelos configuráveis por .env
+MODEL_CERTIDAO = os.getenv("MODEL_CERTIDAO", "gpt-4o")
+MODEL_ESCRITURA = os.getenv("MODEL_ESCRITURA", "gpt-4o")
+DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
-    allow_credentials=True,
+        allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -85,21 +92,29 @@ def extrair_matricula(texto: str) -> str:
 
 def gerar_prompt(tipo: str, texto: str) -> str:
     data_extenso, hora_emissao = _pt_data_extenso_e_hora()
+    if tipo == "escritura":
+        return f"""
+Você é um registrador de imóveis. Analise a(s) escritura(s) enviada(s) conforme as melhores práticas do IRIB, utilizando o guia IRIB em anexo (attachment). Fundamente sua resposta com base no guia e destaque pontos relevantes, inconsistências ou riscos.
 
-    base_prompt = f"""
+Texto(s) da(s) escritura(s):
+{texto}
+"""
+    else:
+        base_prompt = f"""
 Você é um registrador do 6º Registro de Imóveis de Curitiba.
 
 Analise a matrícula abaixo e, em texto corrido, elabore uma certidão da situação jurídica do imóvel, observando:
 
 1. Descreva o imóvel, localização e características.
-2. Informe o(s) proprietário(s) atual(is) e forma de aquisição.
+2. Informe o(s) proprietário(s) atual(is), INDICANDO, A PARTIR DE CÁLCULOS, A PORCENTAGEM DE PROPRIEDADE DE CADA UM (caso não seja possível explicite o motivo) e a forma de aquisição.
 3. Aponte o histórico recente de registros.
 4. Indique se há algum dos seguintes ônus ou gravames vigentes: "regime de patrimônio de afetação imobiliária", "hipoteca", "alienação fiduciária", "penhora", "usufruto", "servidão", "ação real", "ação pessoal", "ação reipersecutória", "impenhorabilidade", "inalienabilidade", "anticrese", "gravame", "ônus". **Desconsidere quaisquer ônus que já tenham sido cancelados.**
 5. Além dos termos descritos, fique atento a qualquer outro caso de ônus ou gravame existente e também aos transportes de ônus ou gravames.
 6. Atentar que, enquanto não forem expressamente cancelados, os ônus ou gravames continuam vigentes e devem ser mencionados.
 7. SE FOR MATRÍCULA MÃE (ex.: incorporação imobiliária ou instituição de condomínio), RETORNAR SOMENTE: "MANDAR A MATRÍCULA FILHA".
 8. Se a matrícula enviada já estiver encerrada, escrever ANTES da certidão: "A MATRÍCULA JÁ FOI ENCERRADA, A CERTIDÃO DE QUANDO ELA ESTAVA ATIVA SEGUE ABAIXO".
-
+9. Lembre-se de que usucapião não é considerado ônus.
+10. LEMBRE-SE DE INDICAR AS PORCENTAGENS DE PROPRIEDADE DE CADA PROPRIETÁRIO.
 No fim, use exatamente este modelo:
 
 Certifico, a requerimento de pessoa interessada, que, revendo os livros de registros imobiliários existentes nesta serventia, em relação ao imóvel constante da matrícula sob nº [NÚMERO], [DESCRIÇÃO DO IMÓVEL], de propriedade de [NOME E CPF DO PROPRIETÁRIO];
@@ -107,14 +122,14 @@ Certifico, a requerimento de pessoa interessada, que, revendo os livros de regis
 - Se não houver ônus: "NÃO CONSTAM quaisquer ônus, gravames, ações reais ou pessoais e reipersecutórias."
 - Se houver ônus: repetir a frase acima e adicionar "a não ser: ..." com a lista.
 
-Consulta a Central Nacional de Indisponibilidade de Bens – CNIB, códigos Hash: [HASH]. O referido é verdade e dou fé.
+O referido é verdade e dou fé.
 Curitiba – PR, {data_extenso}. Certidão emitida às {hora_emissao}.
 
 A matrícula é:
 
 {texto}
 """
-    return base_prompt
+        return base_prompt
 
 def _font_path_dejavu() -> str:
     """
@@ -182,24 +197,41 @@ async def processar_pdf(tipo: str = Form(...), files: list[UploadFile] = File(..
             # 3) montar prompt
             prompt = gerar_prompt(tipo, texto)
 
-            # 4) chamar a IA (Responses API com fallbacks)
+            # 4) selecionar modelo e chamar a IA
+            modelo = MODEL_CERTIDAO if tipo == "certidao" else MODEL_ESCRITURA if tipo == "escritura" else "gpt-4o-mini"
+
+            resultado = None
+            ia_errors = []
+            # Fallback 1: responses API com attachments (para escritura)
             try:
+                attachments = None
+                if tipo == "escritura" and GUIA_IRIB_FILE_ID:
+                    attachments = [{"file_id": GUIA_IRIB_FILE_ID, "tools": [{"type": "file_search"}]}]
                 resposta = client.responses.create(
-                    model="gpt-5",
+                    model=modelo,
                     input=[
                         {"role": "system", "content": "Você é um registrador de imóveis experiente."},
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.2,
+                    attachments=attachments
                 )
                 try:
                     resultado = resposta.output[0].content[0].text
                 except Exception:
-                    resultado = getattr(resposta, "output_text", None) or str(resposta)
-            except Exception:
+                    resultado = getattr(resposta, "output_text", None)
+            except Exception as e1:
+                msg = f"Fallback1 falhou (responses API): {repr(e1)}"
+                ia_errors.append(msg)
+                if DEBUG_MODE:
+                    print(msg)
+                    print(traceback.format_exc())
+
+            # Fallback 2: responses API sem attachments
+            if not resultado:
                 try:
                     resposta = client.responses.create(
-                        model="gpt-4.1-mini",
+                        model=modelo,
                         input=[
                             {"role": "system", "content": "Você é um registrador de imóveis experiente."},
                             {"role": "user", "content": prompt}
@@ -209,11 +241,20 @@ async def processar_pdf(tipo: str = Form(...), files: list[UploadFile] = File(..
                     try:
                         resultado = resposta.output[0].content[0].text
                     except Exception:
-                        resultado = getattr(resposta, "output_text", None) or str(resposta)
-                except Exception:
-                    # fallback legado
+                        resultado = getattr(resposta, "output_text", None)
+                except Exception as e2:
+                    msg = f"Fallback2 falhou (responses API sem attachment): {repr(e2)}"
+                    ia_errors.append(msg)
+                    if DEBUG_MODE:
+                        print(msg)
+                        print(traceback.format_exc())
+
+            # Fallback 3: chat.completions com modelo de backup
+            if not resultado:
+                try:
+                    backup_model = "gpt-4o"
                     resposta = client.chat.completions.create(
-                        model="gpt-4o-mini",
+                        model=backup_model,
                         messages=[
                             {"role": "system", "content": "Você é um registrador de imóveis experiente."},
                             {"role": "user", "content": prompt}
@@ -221,9 +262,24 @@ async def processar_pdf(tipo: str = Form(...), files: list[UploadFile] = File(..
                         temperature=0.2,
                     )
                     resultado = resposta.choices[0].message.content
+                except Exception as e3:
+                    msg = f"Fallback3 falhou (chat.completions): {repr(e3)}"
+                    ia_errors.append(msg)
+                    if DEBUG_MODE:
+                        print(msg)
+                        print(traceback.format_exc())
+                    resultado = None
+
+            # Se continua sem resultado, retorna erro 502 com detalhes
+            if not resultado or (isinstance(resultado, str) and not resultado.strip()):
+                return JSONResponse(status_code=502, content={
+                    "erro": "Falha ao obter resposta da IA",
+                    "modelo": modelo,
+                    "tipo": tipo,
+                    "detalhes": ia_errors[:5]
+                })
 
             # 5) gerar PDF com nomeado pela matrícula
-            # Se você prefere com acento, troque por f"certidão_{matricula}.pdf"
             nome_pdf = f"certidao_{matricula}.pdf"
             _gerar_pdf(resultado, nome_pdf)
             nomes_pdfs.append(nome_pdf)
@@ -232,13 +288,29 @@ async def processar_pdf(tipo: str = Form(...), files: list[UploadFile] = File(..
             return JSONResponse(status_code=400, content={"erro": "Nenhum texto válido extraído dos arquivos enviados."})
 
         if len(nomes_pdfs) == 1:
-            return FileResponse(nomes_pdfs[0], media_type="application/pdf", filename=nomes_pdfs[0])
+            response = FileResponse(nomes_pdfs[0], media_type="application/pdf", filename=nomes_pdfs[0])
+            # Apaga o PDF após um pequeno atraso para garantir o download
+            import threading
+            def remove_file_later(path):
+                import time; time.sleep(10)
+                try: os.remove(path)
+                except Exception as e: print(f"Erro ao apagar PDF gerado: {e}")
+            threading.Thread(target=remove_file_later, args=(nomes_pdfs[0],)).start()
+            return response
         else:
             zip_path = f"certidoes_{uuid.uuid4().hex}.zip"
             with zipfile.ZipFile(zip_path, "w") as zipf:
                 for pdf in nomes_pdfs:
                     zipf.write(pdf)
-            return FileResponse(zip_path, media_type="application/zip", filename="certidoes.zip")
+            response = FileResponse(zip_path, media_type="application/zip", filename="certidoes.zip")
+            import threading
+            def remove_files_later(paths):
+                import time; time.sleep(10)
+                for path in paths:
+                    try: os.remove(path)
+                    except Exception as e: print(f"Erro ao apagar arquivo gerado: {e}")
+            threading.Thread(target=remove_files_later, args=([*nomes_pdfs, zip_path],)).start()
+            return response
 
     except Exception as e:
         print("Erro geral:", traceback.format_exc())

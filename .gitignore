@@ -24,3 +24,7 @@ yarn-error.log*
 
 backend/resposta_*.pdf
 backend/certidao_*.pdf
+
+# env files
+.env
+backend/.env

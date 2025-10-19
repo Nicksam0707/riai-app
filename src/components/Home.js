@@ -43,9 +43,9 @@ export default function Home() {
 
         <div className="cards">
           <Card
-            title="Emitir Certidão"
+            title="Certidão do ônus"
             subtitle="(PDFs)"
-            btn="Gerar Certidão"
+            btn="Emitir Certidão"
             to="/certidao"
             accent="primary"
           />

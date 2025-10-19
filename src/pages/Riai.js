@@ -1,335 +1,199 @@
 // src/pages/Riai.js
 import React, { useRef, useState } from "react";
-import Header from "../components/Header";
-import SpinnerLogo from "../components/SpinnerLogo";
-const API = "http://127.0.0.1:8000"; // troque para 8001 se rodar em outra porta
 
-// util simples para baixar blobs
-function downloadBlob(blob, filename) {
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.setAttribute("download", filename);
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.URL.revokeObjectURL(url);
-}
+import API_BASE_URL from "../utils/api";
 
-// envia arquivos para o backend conforme o tipo
-async function enviarArquivos(tipo, files, setLoading) {
-  if (!files.length) return;
-  try {
-    setLoading(true);
-    const formData = new FormData();
-    files.forEach((f) => formData.append("files", f));
-    formData.append("tipo", tipo);
+const CARD_CONFIG = [
+  {
+    key: "certidao",
+    title: "Certidão do ônus",
+    button: "Emitir Certidão",
+    fileName: { zip: "certidoes.zip", pdf: "certidao.pdf" },
+  },
+  {
+    key: "escritura",
+    title: "Escritura",
+    button: "Analisar Escritura",
+    fileName: { zip: "escrituras.zip", pdf: "escritura-processada.pdf" },
+  },
+  {
+    key: "verificar",
+    title: "Verificar Documento",
+    button: "Verificar",
+    fileName: { zip: "verificacoes.zip", pdf: "verificacao.pdf" },
+  },
+];
 
-    const res = await fetch("http://localhost:8000/api/processar-pdf", {
-      method: "POST",
-      body: formData,
-    });
-    if (!res.ok) throw new Error("Falha no processamento");
-
-    const blob = await res.blob();
-    const contentType = res.headers.get("content-type") || "";
-    const isZip = contentType.includes("application/zip");
-
-    const filename =
-      tipo === "certidao"
-        ? isZip ? "certidoes.zip" : "certidao.pdf"
-        : tipo === "escritura"
-        ? isZip ? "escrituras.zip" : "escritura.pdf"
-        : isZip ? "verificacoes.zip" : "verificacao.pdf";
-
-    downloadBlob(blob, filename);
-  } catch (e) {
-    console.error(e);
-    alert("Erro ao processar os arquivos. Veja o console para detalhes.");
-  } finally {
-    setLoading(false);
-  }
-}
-
-export default function Riai() {
-  // refs para acionar os seletores nativos
-  const certInputRef = useRef(null);
-  const escriInputRef = useRef(null);
-  const veriInputRef = useRef(null);
-
-  // estados de arquivos selecionados
-  const [certFiles, setCertFiles] = useState([]);
-  const [escriFiles, setEscriFiles] = useState([]);
-  const [veriFiles, setVeriFiles] = useState([]);
-
-  // loadings
-  const [loadingCert, setLoadingCert] = useState(false);
-  const [loadingEscri, setLoadingEscri] = useState(false);
-  const [loadingVeri, setLoadingVeri] = useState(false);
-
-  // handlers de seleção
-  const onPickCert = (e) => {
-    const list = Array.from(e.target.files || []);
-    if (list.length) setCertFiles(list);
-    e.target.value = ""; // permite escolher o mesmo arquivo de novo
-  };
-  const onPickEscri = (e) => {
-    const list = Array.from(e.target.files || []);
-    if (list.length) setEscriFiles(list);
-    e.target.value = "";
-  };
-  const onPickVeri = (e) => {
-    const list = Array.from(e.target.files || []);
-    if (list.length) setVeriFiles(list);
-    e.target.value = "";
-  };
-
-  // drag & drop (opcional) – aceita PDF/TIFF
-  const filterAccepted = (files) =>
-    files.filter((f) =>
-      [".pdf", ".tif", ".tiff"].some((ext) =>
-        f.name.toLowerCase().endsWith(ext)
-      )
-    );
-
-  const onDropCert = (e) => {
-    e.preventDefault();
-    const dropped = filterAccepted(Array.from(e.dataTransfer.files || []));
-    if (dropped.length) setCertFiles(dropped);
-  };
-  const onDropEscri = (e) => {
-    e.preventDefault();
-    const dropped = filterAccepted(Array.from(e.dataTransfer.files || []));
-    if (dropped.length) setEscriFiles(dropped);
-  };
-  const onDropVeri = (e) => {
-    e.preventDefault();
-    const dropped = filterAccepted(Array.from(e.dataTransfer.files || []));
-    if (dropped.length) setVeriFiles(dropped);
-  };
-
+function SpinnerOverlay() {
   return (
-    <div>
-      <Header />
-
-      <main className="container">
-        {/* HERO / Título */}
-        <section className="hero">
-          <h1>RIAI by NM 🏛️</h1>
-          <p>Bem-vindo ao sistema inteligente de registros.</p>
-        </section>
-
-        {/* TRÊS PAINÉIS – cada um abre o seletor de arquivos (sem navegar) */}
-        <section className="grid" style={{ marginTop: "1rem" }}>
-          {/* Certidão */}
-          <div className="card">
-            <h3>Emitir Certidão</h3>
-
-            {/* Botão GRANDE – abre o seletor nativo */}
-            <button
-              type="button"
-              className="dropzone"
-              onClick={() => certInputRef.current?.click()}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={onDropCert}
-              aria-label="Selecionar arquivos para certidão"
-            >
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 28 }}>📄</div>
-                <p>
-                  Solte PDFs ou TIFF
-                  <br />
-                  <small>(ou clique para escolher)</small>
-                </p>
-              </div>
-            </button>
-
-            {/* input hidden acionado pelo botão */}
-            <input
-              ref={certInputRef}
-              type="file"
-              accept=".pdf,.tif,.tiff"
-              multiple
-              hidden
-              onChange={onPickCert}
-            />
-
-            {/* lista de arquivos */}
-            {certFiles.length > 0 && (
-              <ul className="file-list">
-                {certFiles.map((f, i) => (
-                  <li key={i}>• {f.name}</li>
-                ))}
-              </ul>
-            )}
-
-            {/* ações */}
-            <div style={{ display: "flex", gap: 12 }}>
-              {loadingCert ? (
-                <div className="spinner-wrap">
-                  <SpinnerLogo />
-                </div>
-              ) : (
-                <>
-                  <button
-                    className="btn btn-blue"
-                    disabled={!certFiles.length}
-                    onClick={() =>
-                      enviarArquivos("certidao", certFiles, setLoadingCert)
-                    }
-                  >
-                    Gerar Certidão
-                  </button>
-                  <button
-                    className="btn"
-                    style={{ background: "#e2e8f0", color: "#0f172a" }}
-                    disabled={!certFiles.length}
-                    onClick={() => setCertFiles([])}
-                  >
-                    Limpar
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Escritura */}
-          <div className="card">
-            <h3>Analisar Escritura</h3>
-
-            <button
-              type="button"
-              className="dropzone"
-              onClick={() => escriInputRef.current?.click()}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={onDropEscri}
-              aria-label="Selecionar arquivos para escritura"
-            >
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 28 }}>📄</div>
-                <p>
-                  Solte PDFs ou TIFF
-                  <br />
-                  <small>(ou clique para escolher)</small>
-                </p>
-              </div>
-            </button>
-
-            <input
-              ref={escriInputRef}
-              type="file"
-              accept=".pdf,.tif,.tiff"
-              multiple
-              hidden
-              onChange={onPickEscri}
-            />
-
-            {escriFiles.length > 0 && (
-              <ul className="file-list">
-                {escriFiles.map((f, i) => (
-                  <li key={i}>• {f.name}</li>
-                ))}
-              </ul>
-            )}
-
-            <div style={{ display: "flex", gap: 12 }}>
-              {loadingEscri ? (
-                <div className="spinner-wrap">
-                  <SpinnerLogo />
-                </div>
-              ) : (
-                <>
-                  <button
-                    className="btn btn-green"
-                    disabled={!escriFiles.length}
-                    onClick={() =>
-                      enviarArquivos("escritura", escriFiles, setLoadingEscri)
-                    }
-                  >
-                    Gerar Escritura
-                  </button>
-                  <button
-                    className="btn"
-                    style={{ background: "#e2e8f0", color: "#0f172a" }}
-                    disabled={!escriFiles.length}
-                    onClick={() => setEscriFiles([])}
-                  >
-                    Limpar
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Verificação */}
-          <div className="card">
-            <h3>Verificar Documento</h3>
-
-            <button
-              type="button"
-              className="dropzone"
-              onClick={() => veriInputRef.current?.click()}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={onDropVeri}
-              aria-label="Selecionar arquivos para verificação"
-            >
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 28 }}>📄</div>
-                <p>
-                  Solte PDFs ou TIFF
-                  <br />
-                  <small>(ou clique para escolher)</small>
-                </p>
-              </div>
-            </button>
-
-            <input
-              ref={veriInputRef}
-              type="file"
-              accept=".pdf,.tif,.tiff"
-              multiple
-              hidden
-              onChange={onPickVeri}
-            />
-
-            {veriFiles.length > 0 && (
-              <ul className="file-list">
-                {veriFiles.map((f, i) => (
-                  <li key={i}>• {f.name}</li>
-                ))}
-              </ul>
-            )}
-
-            <div style={{ display: "flex", gap: 12 }}>
-              {loadingVeri ? (
-                <div className="spinner-wrap">
-                  <SpinnerLogo />
-                </div>
-              ) : (
-                <>
-                  <button
-                    className="btn btn-amber"
-                    disabled={!veriFiles.length}
-                    onClick={() =>
-                      enviarArquivos("verificar", veriFiles, setLoadingVeri)
-                    }
-                  >
-                    Verificar
-                  </button>
-                  <button
-                    className="btn"
-                    style={{ background: "#e2e8f0", color: "#0f172a" }}
-                    disabled={!veriFiles.length}
-                    onClick={() => setVeriFiles([])}
-                  >
-                    Limpar
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </section>
-      </main>
+    <div className="spinner-overlay" aria-live="polite">
+      <div className="spinner-logo">
+        <span role="img" aria-label="spinner" className="spinner-emoji">🔄</span>
+        <span className="spinner-text">RIAI by NM</span>
+      </div>
     </div>
   );
 }
+
+function CardUpload({ config }) {
+  const inputRef = useRef(null);
+  const [files, setFiles] = useState([]);
+  const [dragOver, setDragOver] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  // Accessibility: focus management
+  const buttonRef = useRef(null);
+
+  const handleFiles = (fileList) => {
+    const accepted = Array.from(fileList).filter(f =>
+      [".pdf", ".tif", ".tiff"].some(ext => f.name.toLowerCase().endsWith(ext))
+    );
+    setFiles(accepted);
+    setError("");
+    setSuccess("");
+  };
+
+  const handleInputChange = (e) => {
+    handleFiles(e.target.files);
+    e.target.value = "";
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    handleFiles(e.dataTransfer.files);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = () => setDragOver(false);
+
+  const handleButtonClick = async () => {
+    if (config.key === "escritura" && files.length < 2) {
+      setError("Selecione pelo menos 2 arquivos para analisar.");
+      return;
+    }
+    if (!files.length) return;
+    setLoading(true);
+    setError("");
+    setSuccess("");
+    try {
+      const form = new FormData();
+      files.forEach(f => form.append("files", f));
+      form.append("tipo", config.key);
+
+      const res = await fetch(`${API_BASE_URL}/api/processar-pdf?tipo=${config.key}`, {
+        method: "POST",
+        body: form,
+      });
+
+      if (!res.ok) throw new Error("Falha ao processar. Tente novamente.");
+
+      const blob = await res.blob();
+      const ct = res.headers.get("content-type") || "";
+      const isZip = ct.includes("application/zip");
+      const filename = isZip ? config.fileName.zip : config.fileName.pdf;
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+
+      setSuccess("Download concluído!");
+      setFiles([]);
+    } catch (err) {
+      setError("Erro ao processar. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div
+      className={`card-upload card${dragOver ? " dragover" : ""}`}
+      tabIndex={0}
+      aria-label={config.title}
+      onKeyDown={e => {
+        if (e.key === "Enter" && !loading) inputRef.current?.click();
+      }}
+    >
+      <h3>{config.title}</h3>
+      <div
+        className="dropzone"
+        tabIndex={0}
+        aria-label={`Solte o PDF/TIF aqui ou clique para selecionar`}
+        onClick={() => !loading && inputRef.current?.click()}
+        onKeyDown={e => {
+          if ((e.key === "Enter" || e.key === " ") && !loading) inputRef.current?.click();
+        }}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        style={{ outline: dragOver ? "2px solid #6366f1" : undefined }}
+      >
+        <span role="img" aria-label="document" style={{ fontSize: 32 }}>📄</span>
+        <p>Solte o PDF/TIF aqui ou clique</p>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".pdf,.tif,.tiff"
+          multiple
+          style={{ display: "none" }}
+          onChange={handleInputChange}
+          aria-label="Selecionar arquivos"
+        />
+      </div>
+      <div className="file-list" aria-live="polite">
+        {files.length > 0 && (
+          <ul>
+            {files.map((f, i) => (
+              <li key={i}>{f.name}</li>
+            ))}
+          </ul>
+        )}
+        <span className="file-count" aria-live="polite">
+          {files.length > 0 && `${files.length} arquivo${files.length > 1 ? "s" : ""} selecionado${files.length > 1 ? "s" : ""}`}
+        </span>
+      </div>
+      <button
+        ref={buttonRef}
+        className="btn btn-action"
+        onClick={handleButtonClick}
+        disabled={loading || !files.length || (config.key === "escritura" && files.length < 2)}
+        aria-disabled={loading || !files.length || (config.key === "escritura" && files.length < 2)}
+        tabIndex={0}
+      >
+        {config.button}
+      </button>
+      {loading && <SpinnerOverlay />}
+      {error && <div className="error-msg" aria-live="assertive">{error}</div>}
+      {success && <div className="success-msg" aria-live="polite">{success}</div>}
+    </div>
+  );
+}
+
+export default function Riai() {
+  return (
+    <div className="riai-root">
+      <section className="hero">
+        <h1>RIAI by NM <span role="img" aria-label="registro">🏛️</span></h1>
+        <p>Bem-vindo ao sistema inteligente de registros.</p>
+      </section>
+      <section className="grid-cards">
+        {CARD_CONFIG.map(cfg => (
+          <CardUpload key={cfg.key} config={cfg} />
+        ))}
+      </section>
+    </div>
+  );
+}
+

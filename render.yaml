@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: riai-backend
+    env: docker
+    rootDir: backend
+    plan: free
+    dockerfilePath: backend/Dockerfile
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GUIA_IRIB_FILE_ID
+        sync: false
+      - key: MODEL_CERTIDAO
+        value: gpt-5-mini
+      - key: MODEL_ESCRITURA
+        value: gpt-5-mini
+    healthCheckPath: /docs
+  - type: web
+    name: riai-frontend
+    env: docker
+    rootDir: .
+    plan: free
+    dockerfilePath: Dockerfile
+    envVars:
+      - key: REACT_APP_API_BASE_URL
+        value: https://riai-backend.onrender.com
