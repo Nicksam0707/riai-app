@@ -12,5 +12,6 @@ WORKDIR /app
 RUN npm i -g serve
 COPY --from=build /app/build ./build
 EXPOSE 80
-# Use sh -c so ${PORT} is expanded at runtime (Render provides PORT)
-CMD ["sh", "-c", "serve -s build -l ${PORT:-80}"]
+# Generate runtime env.js and start server; both PORT and REACT_APP_API_BASE_URL come from Render env vars
+ENV PORT=80
+CMD ["sh", "-c", "echo 'window.__ENV = { REACT_APP_API_BASE_URL: \"'${REACT_APP_API_BASE_URL:-http://127.0.0.1:8000}'\" };' > build/env.js && serve -s build -l ${PORT}"]
