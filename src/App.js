@@ -7,6 +7,8 @@ import Riai from "./pages/Riai";
 import Certidao from "./components/Certidao";
 import Escritura from "./components/Escritura";
 import Verificacao from "./components/Verificacao";
+import Login from "./pages/Login";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 export default function App() {
   return (
@@ -14,10 +16,39 @@ export default function App() {
       <Header />
       <main className="container">
         <Routes>
-          <Route path="/" element={<Riai />} />
-          <Route path="/certidao" element={<Certidao />} />
-          <Route path="/escritura" element={<Escritura />} />
-          <Route path="/verificar" element={<Verificacao />} />
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <Riai />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/certidao"
+            element={
+              <ProtectedRoute>
+                <Certidao />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/escritura"
+            element={
+              <ProtectedRoute>
+                <Escritura />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/verificar"
+            element={
+              <ProtectedRoute>
+                <Verificacao />
+              </ProtectedRoute>
+            }
+          />
         </Routes>
       </main>
     </>

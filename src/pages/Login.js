@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { app } from "../lib/firebase"; // ajuste o caminho se necessário
+import { useLocation, useNavigate } from "react-router-dom";
 
 const auth = getAuth(app);
 
@@ -9,6 +10,9 @@ export default function Login() {
   const [senha, setSenha] = useState("");
   const [modoCadastro, setModoCadastro] = useState(false);
   const [mensagem, setMensagem] = useState("");
+  const navigate = useNavigate();
+  const location = useLocation();
+  const from = location.state?.from?.pathname || "/";
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -22,6 +26,8 @@ export default function Login() {
         await signInWithEmailAndPassword(auth, email, senha);
         setMensagem("✅ Login realizado com sucesso!");
       }
+      // redirect after success
+      setTimeout(() => navigate(from, { replace: true }), 300);
     } catch (err) {
       setMensagem("❌ " + err.message);
     }
