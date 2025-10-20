@@ -8,6 +8,7 @@ GUIA_IRIB_FILE_ID = os.getenv("GUIA_IRIB_FILE_ID")  # Coloque o file_id do guia 
 from dotenv import load_dotenv
 from fpdf import FPDF
 import pdfplumber
+import io
 import pytesseract
 from PIL import Image, ImageSequence
 from pdf2image import convert_from_bytes
@@ -43,6 +44,10 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ---------- Utilidades ----------
 
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
 def _pt_data_extenso_e_hora():
     agora = datetime.datetime.now()
     meses_pt = [
@@ -59,7 +64,8 @@ def extrair_texto_pdf(file_bytes: bytes) -> str:
     """
     texto = ""
     try:
-        with pdfplumber.open(file_bytes) as pdf:
+        # Use BytesIO to avoid falling back to OCR desnecessariamente
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
                 texto += page.extract_text() or ""
     except Exception:

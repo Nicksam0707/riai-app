@@ -87,7 +87,7 @@ function CardUpload({ config }) {
       files.forEach(f => form.append("files", f));
       form.append("tipo", config.key);
 
-      const res = await fetch(`${API_BASE_URL}/api/processar-pdf?tipo=${config.key}`, {
+      const res = await fetch(`${API_BASE_URL}/api/processar-pdf`, {
         method: "POST",
         body: form,
       });
