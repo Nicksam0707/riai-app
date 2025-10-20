@@ -10,6 +10,8 @@ services:
         sync: false
       - key: GUIA_IRIB_FILE_ID
         sync: false
+      - key: FRONTEND_ORIGIN
+        value: https://riai-frontend.onrender.com
       - key: MODEL_CERTIDAO
         value: gpt-5-mini
       - key: MODEL_ESCRITURA

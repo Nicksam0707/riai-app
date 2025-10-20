@@ -2,6 +2,8 @@
 import os
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 from fastapi.responses import FileResponse, JSONResponse
 from openai import OpenAI
 GUIA_IRIB_FILE_ID = os.getenv("GUIA_IRIB_FILE_ID")  # Coloque o file_id do guia IRIB aqui
@@ -39,6 +41,43 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+ALLOWED_ORIGINS_SET = set([
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    FRONTEND_ORIGIN,
+])
+
+class EnsureCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        origin = request.headers.get("origin")
+        is_allowed = origin in ALLOWED_ORIGINS_SET if origin else False
+
+        # Preflight
+        if request.method == "OPTIONS" and is_allowed:
+            headers = {
+                "Access-Control-Allow-Origin": origin,
+                "Vary": "Origin",
+                "Access-Control-Allow-Credentials": "false",
+                "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+                "Access-Control-Allow-Headers": request.headers.get("access-control-request-headers", "*"),
+                "Access-Control-Max-Age": "86400",
+            }
+            return Response(status_code=200, headers=headers)
+
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            # Em caso de erro, ainda assim devolve CORS (com 500)
+            response = JSONResponse(status_code=500, content={"erro": str(exc)})
+
+        if is_allowed:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Vary"] = "Origin"
+            response.headers["Access-Control-Allow-Credentials"] = "false"
+            response.headers["Access-Control-Expose-Headers"] = "Content-Disposition, Content-Type"
+        return response
+
+app.add_middleware(EnsureCORSMiddleware)
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
