@@ -25,9 +25,15 @@ MODEL_ESCRITURA = os.getenv("MODEL_ESCRITURA", "gpt-4o")
 DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
 app = FastAPI()
 
+# CORS: permita local e o frontend na Render
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "https://riai-frontend.onrender.com")
 app.add_middleware(
     CORSMiddleware,
-        allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        FRONTEND_ORIGIN,
+    ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -169,17 +175,17 @@ async def processar_pdf(tipo: str = Form(...), files: list[UploadFile] = File(..
     try:
         nomes_pdfs = []
 
+        # 1) Extrair textos de todos os arquivos enviados
+        textos_extraidos = []
         for file in files:
             conteudo = await file.read()
             filename = (file.filename or "").lower()
 
-            # 1) extrair texto conforme extensão
             if filename.endswith(".pdf"):
                 texto = extrair_texto_pdf(conteudo)
             elif filename.endswith(".tif") or filename.endswith(".tiff"):
                 texto = extrair_texto_tiff(file)
             else:
-                # tenta OCR genérico via PIL
                 try:
                     file.file.seek(0)
                     img = Image.open(file.file)
@@ -187,22 +193,17 @@ async def processar_pdf(tipo: str = Form(...), files: list[UploadFile] = File(..
                 except Exception:
                     texto = ""
 
-            if not texto.strip():
-                # ignora arquivos sem texto extraído
-                continue
+            if texto and texto.strip():
+                textos_extraidos.append(texto)
 
-            # 2) extrair matrícula p/ nome do arquivo
-            matricula = extrair_matricula(texto)
+        if not textos_extraidos:
+            return JSONResponse(status_code=400, content={"erro": "Nenhum texto válido extraído dos arquivos enviados."})
 
-            # 3) montar prompt
-            prompt = gerar_prompt(tipo, texto)
+        modelo = MODEL_CERTIDAO if tipo == "certidao" else MODEL_ESCRITURA if tipo == "escritura" else "gpt-4o-mini"
 
-            # 4) selecionar modelo e chamar a IA
-            modelo = MODEL_CERTIDAO if tipo == "certidao" else MODEL_ESCRITURA if tipo == "escritura" else "gpt-4o-mini"
-
+        def chamar_ia(prompt: str):
             resultado = None
             ia_errors = []
-            # Fallback 1: responses API com attachments (para escritura)
             try:
                 attachments = None
                 if tipo == "escritura" and GUIA_IRIB_FILE_ID:
@@ -214,7 +215,7 @@ async def processar_pdf(tipo: str = Form(...), files: list[UploadFile] = File(..
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.2,
-                    attachments=attachments
+                    attachments=attachments,
                 )
                 try:
                     resultado = resposta.output[0].content[0].text
@@ -227,7 +228,6 @@ async def processar_pdf(tipo: str = Form(...), files: list[UploadFile] = File(..
                     print(msg)
                     print(traceback.format_exc())
 
-            # Fallback 2: responses API sem attachments
             if not resultado:
                 try:
                     resposta = client.responses.create(
@@ -249,7 +249,6 @@ async def processar_pdf(tipo: str = Form(...), files: list[UploadFile] = File(..
                         print(msg)
                         print(traceback.format_exc())
 
-            # Fallback 3: chat.completions com modelo de backup
             if not resultado:
                 try:
                     backup_model = "gpt-4o"
@@ -270,7 +269,13 @@ async def processar_pdf(tipo: str = Form(...), files: list[UploadFile] = File(..
                         print(traceback.format_exc())
                     resultado = None
 
-            # Se continua sem resultado, retorna erro 502 com detalhes
+            return resultado, ia_errors
+
+        if tipo == "escritura":
+            # Combine todos os textos em uma única análise para reduzir latência e evitar timeouts
+            combinado = "\n\n-----\n\n".join(textos_extraidos)
+            prompt = gerar_prompt(tipo, combinado)
+            resultado, ia_errors = chamar_ia(prompt)
             if not resultado or (isinstance(resultado, str) and not resultado.strip()):
                 return JSONResponse(status_code=502, content={
                     "erro": "Falha ao obter resposta da IA",
@@ -278,14 +283,25 @@ async def processar_pdf(tipo: str = Form(...), files: list[UploadFile] = File(..
                     "tipo": tipo,
                     "detalhes": ia_errors[:5]
                 })
-
-            # 5) gerar PDF com nomeado pela matrícula
-            nome_pdf = f"certidao_{matricula}.pdf"
+            nome_pdf = f"escritura_analise_{uuid.uuid4().hex[:8]}.pdf"
             _gerar_pdf(resultado, nome_pdf)
             nomes_pdfs.append(nome_pdf)
-
-        if not nomes_pdfs:
-            return JSONResponse(status_code=400, content={"erro": "Nenhum texto válido extraído dos arquivos enviados."})
+        else:
+            # Mantém processamento individual por arquivo para certidões
+            for texto in textos_extraidos:
+                prompt = gerar_prompt(tipo, texto)
+                resultado, ia_errors = chamar_ia(prompt)
+                if not resultado or (isinstance(resultado, str) and not resultado.strip()):
+                    return JSONResponse(status_code=502, content={
+                        "erro": "Falha ao obter resposta da IA",
+                        "modelo": modelo,
+                        "tipo": tipo,
+                        "detalhes": ia_errors[:5]
+                    })
+                matricula = extrair_matricula(texto)
+                nome_pdf = f"certidao_{matricula}.pdf"
+                _gerar_pdf(resultado, nome_pdf)
+                nomes_pdfs.append(nome_pdf)
 
         if len(nomes_pdfs) == 1:
             response = FileResponse(nomes_pdfs[0], media_type="application/pdf", filename=nomes_pdfs[0])
