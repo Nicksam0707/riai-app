@@ -50,12 +50,11 @@ ALLOWED_ORIGINS_SET = set([
 class EnsureCORSMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         origin = request.headers.get("origin")
-        is_allowed = origin in ALLOWED_ORIGINS_SET if origin else False
 
         # Preflight
-        if request.method == "OPTIONS" and is_allowed:
+        if request.method == "OPTIONS":
             headers = {
-                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Origin": "*",
                 "Vary": "Origin",
                 "Access-Control-Allow-Credentials": "false",
                 "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
@@ -70,11 +69,11 @@ class EnsureCORSMiddleware(BaseHTTPMiddleware):
             # Em caso de erro, ainda assim devolve CORS (com 500)
             response = JSONResponse(status_code=500, content={"erro": str(exc)})
 
-        if is_allowed:
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Vary"] = "Origin"
-            response.headers["Access-Control-Allow-Credentials"] = "false"
-            response.headers["Access-Control-Expose-Headers"] = "Content-Disposition, Content-Type"
+        # Always allow any origin (no credentials) to avoid deployment origin mismatches
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Vary"] = "Origin"
+        response.headers["Access-Control-Allow-Credentials"] = "false"
+        response.headers["Access-Control-Expose-Headers"] = "Content-Disposition, Content-Type"
         return response
 
 app.add_middleware(EnsureCORSMiddleware)
